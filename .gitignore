@@ -3,5 +3,6 @@ node_modules/
 build/
 .env
 storage/lancedb/
-exports/
+exports/*
+!exports/.gitkeep
 *.js.map
