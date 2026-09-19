@@ -17,11 +17,17 @@ const EnvSchema = z.object({
   SEARCH_TOP_K: z.coerce.number().int().positive().default(10),
 
   /**
-   * Dimensionality of the embedding vectors stored in LanceDB.
-   * Must match the model used to generate embeddings.
-   * Default of 1536 matches text-embedding-ada-002 / text-embedding-3-small.
+   * Local embedding model name (Xenova/transformers hub ID).
+   * all-MiniLM-L6-v2 produces 384-dim vectors and runs fully offline.
    */
-  VECTOR_DIMENSIONS: z.coerce.number().int().positive().default(1536),
+  EMBEDDING_MODEL: z.string().default("Xenova/all-MiniLM-L6-v2"),
+
+  /**
+   * Dimensionality of the embedding vectors stored in LanceDB.
+   * Must match the model output size.
+   * 384 matches all-MiniLM-L6-v2; change alongside EMBEDDING_MODEL if swapped.
+   */
+  VECTOR_DIMENSIONS: z.coerce.number().int().positive().default(384),
 
   /** Minimum verbosity level for structured log output */
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -52,6 +58,7 @@ function loadConfig() {
     lancedbPath: path.resolve(env.LANCEDB_PATH),
     exportsDir: path.resolve(env.EXPORTS_DIR),
     searchTopK: env.SEARCH_TOP_K,
+    embeddingModel: env.EMBEDDING_MODEL,
     vectorDimensions: env.VECTOR_DIMENSIONS,
     logLevel: env.LOG_LEVEL,
     isDev: env.NODE_ENV === "development",
