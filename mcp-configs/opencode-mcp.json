@@ -1,0 +1,17 @@
+{
+  "mcp": {
+    "chat-mcp": {
+      "type": "local",
+      "command": "node",
+      "args": ["<ABSOLUTE_PATH_TO_PROJECT>/build/index.js"],
+      "env": {
+        "LANCEDB_PATH": "<ABSOLUTE_PATH_TO_PROJECT>/storage/lancedb",
+        "EXPORTS_DIR": "<ABSOLUTE_PATH_TO_PROJECT>/exports",
+        "EMBEDDING_MODEL": "Xenova/all-MiniLM-L6-v2",
+        "VECTOR_DIMENSIONS": "384",
+        "SEARCH_TOP_K": "10",
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}
