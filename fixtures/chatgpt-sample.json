@@ -1,0 +1,67 @@
+[
+  {
+    "id": "fixture-chatgpt-001",
+    "title": "Designing a Redis caching layer",
+    "create_time": 1704067200,
+    "update_time": 1704070800,
+    "mapping": {
+      "node-root": {
+        "message": null,
+        "parent": null,
+        "children": ["node-1"]
+      },
+      "node-1": {
+        "message": {
+          "id": "msg-chatgpt-001",
+          "author": { "role": "user" },
+          "content": {
+            "content_type": "text",
+            "parts": ["I'm building a Node.js API and want to add a Redis caching layer for expensive database queries. What's the best strategy?"]
+          },
+          "create_time": 1704067200
+        },
+        "parent": "node-root",
+        "children": ["node-2"]
+      },
+      "node-2": {
+        "message": {
+          "id": "msg-chatgpt-002",
+          "author": { "role": "assistant" },
+          "content": {
+            "content_type": "text",
+            "parts": ["For a Node.js API caching layer with Redis, I'd recommend the cache-aside (lazy loading) pattern. Here's the strategy:\n\n1. **Cache-aside pattern**: Check Redis first, fall back to DB on miss, then populate cache.\n2. **TTL strategy**: Set appropriate expiry times per data type — user sessions 24h, product data 1h, realtime data 30s.\n3. **Key naming**: Use structured keys like `user:{id}:profile` or `product:{id}:details`.\n4. **Invalidation**: Delete or update cache keys on write operations to avoid stale data.\n\nHere's a simple implementation:\n\n```js\nasync function getCachedQuery(key, ttl, queryFn) {\n  const cached = await redis.get(key);\n  if (cached) return JSON.parse(cached);\n  \n  const result = await queryFn();\n  await redis.setex(key, ttl, JSON.stringify(result));\n  return result;\n}\n```\n\nFor cache invalidation on writes, use a write-through approach or publish events to clear related keys."]
+          },
+          "create_time": 1704067500
+        },
+        "parent": "node-1",
+        "children": ["node-3"]
+      },
+      "node-3": {
+        "message": {
+          "id": "msg-chatgpt-003",
+          "author": { "role": "user" },
+          "content": {
+            "content_type": "text",
+            "parts": ["How do I handle cache stampede when multiple requests hit a cache miss at the same time?"]
+          },
+          "create_time": 1704068000
+        },
+        "parent": "node-2",
+        "children": ["node-4"]
+      },
+      "node-4": {
+        "message": {
+          "id": "msg-chatgpt-004",
+          "author": { "role": "assistant" },
+          "content": {
+            "content_type": "text",
+            "parts": ["Cache stampede (also called thundering herd) is a real problem. The best solutions are:\n\n**1. Mutex/Lock pattern** — use Redis SETNX to acquire a lock before querying the DB:\n```js\nconst lock = await redis.setnx(`lock:${key}`, 1);\nif (lock) {\n  const result = await queryDb();\n  await redis.setex(key, ttl, JSON.stringify(result));\n  await redis.del(`lock:${key}`);\n} else {\n  // Poll or wait for the lock to be released\n  await sleep(50);\n  return getCachedQuery(key, ttl, queryFn);\n}\n```\n\n**2. Probabilistic early expiration** — refresh the cache slightly before it expires using a random early recomputation window.\n\n**3. Promise coalescing** — deduplicate in-flight requests at the application layer using a Map of pending promises:\n```js\nconst inflight = new Map();\nif (!inflight.has(key)) {\n  inflight.set(key, queryFn().finally(() => inflight.delete(key)));\n}\nreturn inflight.get(key);\n```\n\nFor most Node.js apps, promise coalescing is the simplest and most effective solution since Node is single-threaded."]
+          },
+          "create_time": 1704068400
+        },
+        "parent": "node-3",
+        "children": []
+      }
+    }
+  }
+]

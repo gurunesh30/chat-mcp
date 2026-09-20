@@ -1,0 +1,31 @@
+{
+  "conversations": [
+    {
+      "id": "fixture-gemini-001",
+      "createTime": "2024-03-10T14:00:00.000Z",
+      "updateTime": "2024-03-10T14:30:00.000Z",
+      "parts": [
+        {
+          "role": "user",
+          "text": "What are the key differences between React Server Components and Client Components, and when should I use each?",
+          "createTime": "2024-03-10T14:00:00.000Z"
+        },
+        {
+          "role": "model",
+          "text": "React Server Components (RSC) and Client Components serve fundamentally different purposes in the React rendering model:\n\n**Server Components**\n- Render exclusively on the server — zero JavaScript sent to the client\n- Can directly access databases, file systems, and secrets\n- Cannot use hooks (`useState`, `useEffect`), browser APIs, or event handlers\n- Great for: data fetching, static content, layouts, anything that doesn't need interactivity\n\n**Client Components** (marked with `'use client'`)\n- Render on the client (and optionally SSR on the server for the initial HTML)\n- Have access to browser APIs, hooks, and event listeners\n- Bundle their JavaScript and send it to the browser\n- Great for: interactive UIs, forms, real-time updates, anything requiring state\n\n**Decision rule of thumb:**\n- Default to Server Components — they're more performant and simpler\n- Drop down to Client Components only when you need interactivity or browser APIs\n- You can nest Client Components inside Server Components, but NOT the reverse\n\n**Common pattern:**\n```jsx\n// ServerComponent.tsx (no directive needed)\nasync function ProductPage({ id }) {\n  const product = await db.products.findById(id); // direct DB access\n  return <ProductDetails product={product} />;\n}\n\n// ClientComponent.tsx\n'use client';\nfunction AddToCartButton({ productId }) {\n  const [loading, setLoading] = useState(false);\n  // ... interactive logic\n}\n```",
+          "createTime": "2024-03-10T14:05:00.000Z"
+        },
+        {
+          "role": "user",
+          "text": "How do Server Actions fit into this picture for handling form submissions?",
+          "createTime": "2024-03-10T14:15:00.000Z"
+        },
+        {
+          "role": "model",
+          "text": "Server Actions are the missing piece that makes the RSC model complete for mutations. They let you define server-side functions that can be called directly from both Server and Client Components without writing API routes.\n\n**Defining a Server Action:**\n```ts\n// actions.ts\n'use server';\n\nexport async function createProduct(formData: FormData) {\n  const name = formData.get('name') as string;\n  const price = Number(formData.get('price'));\n  \n  // Validate\n  if (!name || isNaN(price)) throw new Error('Invalid input');\n  \n  // Direct DB write — no API route needed\n  await db.products.create({ name, price });\n  revalidatePath('/products'); // invalidate Next.js cache\n}\n```\n\n**Using in a Server Component (progressive enhancement — works without JS):**\n```jsx\n<form action={createProduct}>\n  <input name=\"name\" />\n  <input name=\"price\" type=\"number\" />\n  <button type=\"submit\">Create</button>\n</form>\n```\n\n**Using in a Client Component (with pending state):**\n```jsx\n'use client';\nimport { useTransition } from 'react';\n\nfunction CreateForm() {\n  const [isPending, startTransition] = useTransition();\n  return (\n    <form action={(fd) => startTransition(() => createProduct(fd))}>\n      <button disabled={isPending}>Create</button>\n    </form>\n  );\n}\n```\n\nThe key benefit: you get type-safe mutations with co-located logic, automatic CSRF protection, and progressive enhancement — no separate API layer required.",
+          "createTime": "2024-03-10T14:25:00.000Z"
+        }
+      ]
+    }
+  ]
+}
