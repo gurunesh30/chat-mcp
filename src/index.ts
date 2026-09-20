@@ -1,11 +1,14 @@
 /**
  * index.ts — MCP Chat Memory Server entry point
  *
- * Wires together:
- *  - McpServer (high-level MCP abstraction)
- *  - StdioServerTransport (communicates over stdin/stdout for IDE integration)
- *  - LanceDB client (initialised eagerly so table schemas are ready)
- *  - Tool & resource registrations (Phase 2 / 3 — stubs for now)
+ * Boot sequence:
+ *  1. Validate env config
+ *  2. Initialise LanceDB (create tables if absent)
+ *  3. Warm up embedding model (downloads weights on first run)
+ *  4. Register MCP tools (ingest_chat_session, query_chat_context)
+ *  5. Register MCP resources (chat://sessions/latest, chat://session/:id)
+ *  6. Connect StdioServerTransport
+ *  7. Start file watcher on ./exports
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -13,6 +16,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 
 import { config } from "./config.js";
 import { getDbClient, closeDbClient } from "./db/client.js";
+import { warmupEmbedder } from "./embed/embedder.js";
+import { registerIngestTool } from "./tools/ingestTool.js";
+import { startFileWatcher } from "./ingest/fileWatcher.js";
+import type { WatcherHandle } from "./ingest/fileWatcher.js";
 
 // ---------------------------------------------------------------------------
 // Server metadata
@@ -22,15 +29,14 @@ const SERVER_NAME = "chat-mcp";
 const SERVER_VERSION = "0.1.0";
 
 // ---------------------------------------------------------------------------
-// Logger (writes to stderr so it doesn't pollute the MCP stdio channel)
+// Logger — always writes to stderr, never the MCP stdio channel
 // ---------------------------------------------------------------------------
 
 function log(level: "info" | "warn" | "error", message: string): void {
-  const levels = { debug: 0, info: 1, warn: 2, error: 3 };
+  const levels: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
   const configured = levels[config.logLevel] ?? 1;
-  if (levels[level] >= configured) {
-    const prefix = `[chat-mcp] [${level.toUpperCase()}]`;
-    process.stderr.write(`${prefix} ${message}\n`);
+  if ((levels[level] ?? 1) >= configured) {
+    process.stderr.write(`[chat-mcp] [${level.toUpperCase()}] ${message}\n`);
   }
 }
 
@@ -38,10 +44,14 @@ function log(level: "info" | "warn" | "error", message: string): void {
 // Graceful shutdown
 // ---------------------------------------------------------------------------
 
-function registerShutdownHandlers(server: McpServer): void {
+function registerShutdownHandlers(
+  server: McpServer,
+  watcher: WatcherHandle | null
+): void {
   const shutdown = async (signal: string) => {
     log("info", `Received ${signal} — shutting down`);
     try {
+      if (watcher) await watcher.stop();
       await server.close();
     } finally {
       closeDbClient();
@@ -49,33 +59,25 @@ function registerShutdownHandlers(server: McpServer): void {
     }
   };
 
-  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGINT",  () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 // ---------------------------------------------------------------------------
-// Tool & resource registration (populated in Phase 2 / 3)
+// Tool registration (Phase 2 complete, Phase 3 stubs wired in next commit)
 // ---------------------------------------------------------------------------
 
-/**
- * Register all MCP tools on the server.
- *
- * Phase 2 will call registerIngestTool(server) here.
- * Phase 3 will call registerSearchTool(server) here.
- */
-function registerTools(_server: McpServer): void {
-  // Intentionally empty — Phase 2 / 3 implementations plug in here.
+function registerTools(server: McpServer): void {
+  registerIngestTool(server);
+  // registerSearchTool(server)  ← wired in Phase 3 commit
 }
 
-/**
- * Register all MCP resources on the server.
- *
- * Phase 3 will expose:
- *  - chat://sessions/latest
- *  - chat://session/:id
- */
+// ---------------------------------------------------------------------------
+// Resource registration (Phase 3 — wired in next Phase 3 commit)
+// ---------------------------------------------------------------------------
+
 function registerResources(_server: McpServer): void {
-  // Intentionally empty — Phase 3 implementation plugs in here.
+  // registerSessionResources(server)  ← wired in Phase 3 commit
 }
 
 // ---------------------------------------------------------------------------
@@ -84,17 +86,23 @@ function registerResources(_server: McpServer): void {
 
 async function main(): Promise<void> {
   log("info", `Starting ${SERVER_NAME} v${SERVER_VERSION}`);
-  log("info", `LanceDB path : ${config.lancedbPath}`);
-  log("info", `Exports dir  : ${config.exportsDir}`);
-  log("info", `Vector dims  : ${config.vectorDimensions}`);
-  log("info", `Log level    : ${config.logLevel}`);
+  log("info", `LanceDB path    : ${config.lancedbPath}`);
+  log("info", `Exports dir     : ${config.exportsDir}`);
+  log("info", `Embedding model : ${config.embeddingModel}`);
+  log("info", `Vector dims     : ${config.vectorDimensions}`);
+  log("info", `Log level       : ${config.logLevel}`);
 
-  // 1. Initialise LanceDB — ensures tables exist before accepting requests
+  // 1. Initialise LanceDB
   log("info", "Initialising LanceDB...");
   await getDbClient();
   log("info", "LanceDB ready");
 
-  // 2. Create MCP server
+  // 2. Warm up the embedding model so the first ingest isn't slow
+  log("info", "Loading embedding model (first run downloads weights)...");
+  await warmupEmbedder();
+  log("info", "Embedding model ready");
+
+  // 3. Create MCP server
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
@@ -105,18 +113,27 @@ async function main(): Promise<void> {
     }
   );
 
-  // 3. Register tools and resources
+  // 4. Register tools and resources
   registerTools(server);
   registerResources(server);
 
-  // 4. Wire up graceful shutdown
-  registerShutdownHandlers(server);
-
-  // 5. Connect to stdio transport and start listening
+  // 5. Connect stdio transport BEFORE starting the file watcher so the
+  //    server is ready to accept requests while the initial scan runs.
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
   log("info", "Server connected — listening on stdio");
+
+  // 6. Start file watcher (non-blocking after initial ready event)
+  let watcher: WatcherHandle | null = null;
+  try {
+    watcher = await startFileWatcher(config.exportsDir);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log("warn", `File watcher failed to start: ${msg} — continuing without watcher`);
+  }
+
+  // 7. Register shutdown handlers with watcher reference
+  registerShutdownHandlers(server, watcher);
 }
 
 main().catch((err: unknown) => {
