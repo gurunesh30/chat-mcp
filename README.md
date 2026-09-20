@@ -1,73 +1,148 @@
 # chat-mcp
 
-A lightweight MCP server that ingests chat history from ChatGPT, Claude, and Gemini, indexes it into an embedded local [LanceDB](https://lancedb.com/) vector database, and exposes retrieval tools for coding agents (OpenCode, Kiro, Cursor, Antigravity).
+A headless Model Context Protocol (MCP) server that ingests conversation history from ChatGPT, Claude, and Gemini into a local vector database (**LanceDB**). `chat-mcp` provides long-term cross-session memory and retrieval capabilities directly to downstream coding agents like **OpenCode**, **Cursor**, **Google Antigravity**, and **AWS Kiro**.
 
-## Architecture
+---
+
+## Key Features
+
+* **Zero-Config Vector DB:** Uses LanceDB running locally inside the process—no Docker or external database services required.
+* **Multi-Provider Support:** Ingests and normalizes export files from ChatGPT, Claude, and Gemini.
+* **Automatic Ingestion:** Monitors an `./exports` directory with `chokidar` to parse and embed new chat exports dynamically.
+* **Standard MCP Protocol:** Connects seamlessly over `stdio` to any compatible AI host environment.
+
+---
+
+## Project Structure
+
+```text
+chat-mcp/
+├── exports/                  # Drop box for raw ChatGPT, Claude, or Gemini exports
+├── storage/
+│   └── lancedb/              # Local vector store data directory
+├── src/
+│   ├── config.ts             # Environment & path configuration
+│   ├── index.ts              # MCP server setup & entry point
+│   ├── db/
+│   │   ├── client.ts         # LanceDB connection & table initialization
+│   │   └── vectorStore.ts    # Search algorithms & embeddings pipeline
+│   ├── ingest/
+│   │   ├── fileWatcher.ts    # Chokidar watcher for local exports
+│   │   └── parser.ts         # Multi-format JSON & Markdown transcript parsers
+│   ├── tools/
+│   │   ├── ingestTool.ts     # Definition for `ingest_chat_session` tool
+│   │   └── searchTool.ts     # Definition for `query_chat_context` tool
+│   └── types/
+│       └── index.ts          # TypeScript interfaces and schemas
+├── .gitignore
+├── .env.example
+├── package.json
+├── tsconfig.json
+└── README.md
 
 ```
-stdio transport (IDE ↔ server)
-        │
-   McpServer (MCP SDK)
-        │
-   ┌────┴────────────────┐
-   │  tools              │
-   │  ingest_chat_session│  ← Phase 2
-   │  query_chat_context │  ← Phase 3
-   └────┬────────────────┘
-        │
-   LanceDB (./storage/lancedb)
-   ┌────────────┬──────────────┐
-   │ messages   │   sessions   │
-   │ (+ vectors)│              │
-   └────────────┴──────────────┘
-        ▲
-   file watcher (./exports)  ← Phase 2
-```
 
-## Tech stack
+---
 
-| Concern | Library |
-|---|---|
-| Protocol | `@modelcontextprotocol/sdk` (Stdio) |
-| Storage + vectors | `@lancedb/lancedb` (embedded) |
-| File watching | `chokidar` |
-| Validation | `zod` |
-| Runtime | Node.js 22 + TypeScript (`tsx` for dev) |
+## Walkthrough & Setup
 
-## Getting started
+### 1. Prerequisites
 
-```bash
+* **Node.js**: v18 or higher
+* **npm**: v9 or higher
+
+### 2. Installation & Build
+
+```zsh
+# Clone the repository
+git clone https://github.com/your-username/chat-mcp.git
+cd chat-mcp
+
 # Install dependencies
 npm install
 
-# Build
+# Build the TypeScript project
 npm run build
 
-# Run (the IDE connects via stdio)
-npm start
-
-# Development (live reload)
-npm run dev
-
-# Test with MCP Inspector
-npm run inspect
 ```
 
-## Environment variables
+### 3. Usage & Ingestion
 
-Copy `.env.example` to `.env` and adjust as needed:
+There are two primary ways to populate your chat memory:
 
-| Variable | Default | Description |
-|---|---|---|
-| `LANCEDB_PATH` | `./storage/lancedb` | LanceDB storage directory |
-| `EXPORTS_DIR` | `./exports` | Directory watched for chat export files |
-| `SEARCH_TOP_K` | `10` | Max search results per query |
-| `VECTOR_DIMENSIONS` | `1536` | Embedding vector size |
-| `LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
+1. **Automatic File Sync:** Drop exported chat JSON or Markdown files into the local `./exports/` folder. The built-in file watcher parses and indexes them automatically.
+2. **Direct Tool Calling:** AI host environments can programmatically stream chats using the `ingest_chat_session` tool.
 
-## Roadmap
+### 4. Agent Integration
 
-- **Phase 1** ✅ Foundation — TypeScript project, LanceDB schema, MCP server skeleton
-- **Phase 2** 🔲 Ingestion — ChatGPT/Claude/Gemini parsers, `ingest_chat_session` tool, file watcher
-- **Phase 3** 🔲 Retrieval — vector search, `query_chat_context` tool, MCP resources
-- **Phase 4** 🔲 Integration — inspector testing, agent config (OpenCode, Cursor, Kiro)
+Register `chat-mcp` in your tool or editor settings (e.g., `mcpSettings.json` or `opencode.json`):
+
+```json
+{
+  "mcpServers": {
+    "chat-mcp": {
+      "command": "node",
+      "args": ["/absolute/path/to/chat-mcp/build/index.js"]
+    }
+  }
+}
+
+```
+
+---
+
+## API & Tool Documentation
+
+### Tools
+
+#### `query_chat_context`
+
+Searches indexed conversation history for technical decisions, code snippets, or architectural choices.
+
+* **Input Schema:**
+```json
+{
+  "query": "string (Required) - Search string or architectural decision to query",
+  "limit": "number (Optional) - Number of relevant turns to return. Default: 5"
+}
+
+```
+
+
+* **Output Format:**
+Returns an array of JSON objects matching the search query, including message content, original session ID, and role.
+
+---
+
+#### `ingest_chat_session`
+
+Programmatically saves a full conversation thread into the local vector database.
+
+* **Input Schema:**
+```json
+{
+  "session_id": "string (Required) - Unique ID for the conversation session",
+  "messages": [
+    {
+      "role": "user | assistant | system (Required)",
+      "content": "string (Required)"
+    }
+  ]
+}
+
+```
+
+
+* **Output Format:**
+Confirmation message with total count of indexed messages.
+
+---
+
+### Resources
+
+#### `chat://sessions/latest`
+
+Provides downstream agents with immediate context from the most recently ingested chat transcript.
+
+* **URI:** `chat://sessions/latest`
+* **MIME Type:** `application/json`
