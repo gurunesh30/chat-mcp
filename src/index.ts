@@ -18,8 +18,10 @@ import { config } from "./config.js";
 import { getDbClient, closeDbClient } from "./db/client.js";
 import { warmupEmbedder } from "./embed/embedder.js";
 import { registerIngestTool } from "./tools/ingestTool.js";
+import { registerSearchTool } from "./tools/searchTool.js";
 import { startFileWatcher } from "./ingest/fileWatcher.js";
 import type { WatcherHandle } from "./ingest/fileWatcher.js";
+import { registerSessionResources } from "./resources/sessionResources.js";
 
 // ---------------------------------------------------------------------------
 // Server metadata
@@ -69,15 +71,15 @@ function registerShutdownHandlers(
 
 function registerTools(server: McpServer): void {
   registerIngestTool(server);
-  // registerSearchTool(server)  ← wired in Phase 3 commit
+  registerSearchTool(server);
 }
 
 // ---------------------------------------------------------------------------
 // Resource registration (Phase 3 — wired in next Phase 3 commit)
 // ---------------------------------------------------------------------------
 
-function registerResources(_server: McpServer): void {
-  // registerSessionResources(server)  ← wired in Phase 3 commit
+function registerResources(server: McpServer): void {
+  registerSessionResources(server);
 }
 
 // ---------------------------------------------------------------------------
