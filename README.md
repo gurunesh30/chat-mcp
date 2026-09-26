@@ -12,7 +12,6 @@ A headless Model Context Protocol (MCP) server that ingests conversation history
 * **Standard MCP Protocol:** Connects seamlessly over `stdio` to any compatible AI host environment.
 
 ---
-
 ## Project Structure
 
 ```text
