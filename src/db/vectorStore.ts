@@ -29,9 +29,11 @@ import type {
 async function getExistingMessageIds(sessionId: string): Promise<Set<string>> {
   const { messagesTable } = await getDbClient();
   const safe = sessionId.replace(/'/g, "''");
+  // LanceDB's SQL parser lowercases unquoted identifiers, so the camelCase
+  // `sessionId` column must be wrapped in backticks to match the stored schema.
   const rows = await messagesTable
     .query()
-    .where(`sessionId = '${safe}'`)
+    .where(`\`sessionId\` = '${safe}'`)
     .select(["id"])       // VectorQuery / Query both expose select()
     .toArray();
   return new Set(rows.map((r) => String(r.id)));
@@ -163,7 +165,7 @@ export async function getMessagesBySession(
   const safe = sessionId.replace(/'/g, "''");
   const rows = await messagesTable
     .query()
-    .where(`sessionId = '${safe}'`)
+    .where(`\`sessionId\` = '${safe}'`)
     .toArray();
 
   return rows
@@ -236,9 +238,11 @@ export async function searchMessages(
     if (query.fromTimestamp !== undefined && ts < query.fromTimestamp) continue;
     if (query.toTimestamp !== undefined && ts > query.toTimestamp) continue;
 
-    // _distance is L2 distance (lower = more similar); convert to [0,1] score
-    const distance = typeof r._distance === "number" ? r._distance : 1;
-    const score = Math.max(0, 1 - distance);
+    // _distance is L2 distance from LanceDB. With L2-normalised embeddings
+    // the distance ranges 0..2 (0 = identical, 2 = opposite). Convert to a
+    // [0, 1] similarity score so higher == more relevant.
+    const distance = typeof r._distance === "number" ? r._distance : 2;
+    const score = Math.max(0, 1 - distance / 2);
 
     results.push({
       message: {
